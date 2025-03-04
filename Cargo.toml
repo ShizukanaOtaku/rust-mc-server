@@ -1,0 +1,7 @@
+[package]
+name = "mc_server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mc_protocol = { git = "https://github.com/ShizukanaOtaku/mc-protocol-rs" }
