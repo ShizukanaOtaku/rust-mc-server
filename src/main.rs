@@ -16,10 +16,17 @@ use mc_protocol::{
 const SERVER_STATUS: &str = "
 {
     \"version\": {
-            \"name\":\"1.21.4\",
-            \"protocol\":769
-        }
+        \"name\":\"1.21.4\",
+        \"protocol\":769
+    },
+    \"description\": {
+        \"text\": \"Hello, world!\"
+    },
+    \"players\": {
+        \"max\": 64,
+        \"online\": 16
     }
+}
 ";
 
 fn main() {
