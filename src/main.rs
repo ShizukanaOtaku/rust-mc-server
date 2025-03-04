@@ -13,7 +13,14 @@ use mc_protocol::{
     },
 };
 
-const SERVER_STATUS: &str = "{\"version\":{\"name\":\"1.21.4\",\"protocol\":769}}";
+const SERVER_STATUS: &str = "
+{
+    \"version\": {
+            \"name\":\"1.21.4\",
+            \"protocol\":769
+        }
+    }
+";
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:25565").unwrap();
