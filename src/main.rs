@@ -44,10 +44,14 @@ fn main() {
 fn handle_connection(stream: &mut std::net::TcpStream) {
     let mut buf = vec![0; MAX_PACKET_SIZE];
     let bytes_read = stream.read(&mut buf).unwrap();
-    let buf = &buf[0..bytes_read];
+    let buf = &buf[..bytes_read];
     println!("Read {bytes_read} bytes: {buf:?}");
     let raw_packet = parse_packet(&buf.to_vec());
-    match InboundPacket::try_from(raw_packet) {
+    println!("Packet has {} bytes of length", raw_packet.length);
+    match InboundPacket::try_from(
+        mc_protocol::packet::ConnectionState::Handshaking,
+        raw_packet,
+    ) {
         Ok(packet) => handle_packet(stream, packet),
         Err(error) => match error {
             PacketParseError::CorruptPacket => println!("Corrupt packet received."),
@@ -64,10 +68,12 @@ fn handle_packet(stream: &mut std::net::TcpStream, packet: InboundPacket) {
             server_port,
             next_state,
         } => {
+            let protocol_version: isize = protocol_version.try_into().unwrap();
+            let next_state: isize = next_state.try_into().unwrap();
             println!(
-                "A handshake was received: protocol: {protocol_version}, {server_address}:{server_port}, next_state: {next_state}"
+                "A handshake was received: protocol: {protocol_version}, {server_address}:{server_port}, next_state: {next_state}",
             );
-            let response = OutboundPacket::StatusResponsePacket {
+            let response = OutboundPacket::StatusResponse {
                 status_json: SERVER_STATUS.to_string(),
             };
             let bytes: Vec<u8> = response.into();
