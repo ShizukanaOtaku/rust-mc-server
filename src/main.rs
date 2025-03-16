@@ -48,8 +48,8 @@ fn main() {
         let thread_states = Arc::clone(&states);
         thread::spawn(move || {
             loop {
-                if let Err(e) = handle_connection(&mut stream, &thread_states) {
-                    println!("Disconnecting a client: {e:?}");
+                if !handle_connection(&mut stream, &thread_states) {
+                    println!("Disconnecting a client");
                     break;
                 }
             }
@@ -60,22 +60,22 @@ fn main() {
 fn handle_connection(
     stream: &mut std::net::TcpStream,
     states: &Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
-) -> Result<(), Option<Box<dyn Error>>> {
+) -> bool {
     let mut buf = vec![0; MAX_PACKET_SIZE];
     let bytes_read = match stream.read(&mut buf) {
         Ok(bytes) => bytes,
-        Err(e) => return Err(Some(Box::new(e))),
+        Err(_) => return false,
     };
     let buf = &buf[..bytes_read];
 
     if bytes_read == 0 {
-        return Ok(());
+        return false;
     }
 
     let raw_packet = parse_packet(&buf.to_vec());
     let peer_addr = match stream.peer_addr() {
         Ok(addr) => addr,
-        Err(e) => return Err(Some(Box::new(e))),
+        Err(_) => return false,
     };
 
     let connection_state = states
@@ -93,7 +93,7 @@ fn handle_connection(
         },
     }
 
-    Ok(())
+    true
 }
 
 fn handle_packet(
