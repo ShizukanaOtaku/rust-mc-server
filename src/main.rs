@@ -100,8 +100,10 @@ fn handle_packet(
                     _ => ConnectionState::Handshaking,
                 },
             );
-            send_status(stream);
-            send_pong(stream);
+            if next_state != 2 {
+                send_status(stream);
+                send_pong(stream);
+            }
         }
         InboundPacket::StatusRequest {} => send_status(stream),
         InboundPacket::PingRequest { timestamp: _ } => send_pong(stream),
