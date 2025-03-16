@@ -1,12 +1,16 @@
 use std::{
+    collections::HashMap,
     io::{Read, Write},
-    net::TcpListener,
+    net::{SocketAddr, TcpListener},
+    sync::{Arc, Mutex},
     thread,
+    time::SystemTime,
 };
 
 use mc_protocol::{
     MAX_PACKET_SIZE,
     packet::{
+        ConnectionState,
         inbound::{InboundPacket, PacketParseError},
         outbound::OutboundPacket,
         parse_packet,
@@ -31,28 +35,40 @@ const SERVER_STATUS: &str = "
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:25565").unwrap();
+    let states = Arc::new(Mutex::new(HashMap::new()));
 
     for stream in listener.incoming() {
         let mut stream = stream.unwrap();
+        states
+            .lock()
+            .unwrap()
+            .insert(stream.peer_addr().unwrap(), ConnectionState::Handshaking);
 
+        let thread_states = Arc::clone(&states);
         thread::spawn(move || {
-            handle_connection(&mut stream);
+            handle_connection(&mut stream, thread_states);
         });
     }
 }
 
-fn handle_connection(stream: &mut std::net::TcpStream) {
+fn handle_connection(
+    stream: &mut std::net::TcpStream,
+    states: Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
+) {
     let mut buf = vec![0; MAX_PACKET_SIZE];
     let bytes_read = stream.read(&mut buf).unwrap();
     let buf = &buf[..bytes_read];
     println!("Read {bytes_read} bytes: {buf:?}");
     let raw_packet = parse_packet(&buf.to_vec());
     println!("Packet has {} bytes of length", raw_packet.length);
-    match InboundPacket::try_from(
-        mc_protocol::packet::ConnectionState::Handshaking,
-        raw_packet,
-    ) {
-        Ok(packet) => handle_packet(stream, packet),
+    let connection_state = states
+        .lock()
+        .unwrap()
+        .get(&stream.peer_addr().unwrap())
+        .unwrap_or(&ConnectionState::Handshaking)
+        .clone();
+    match InboundPacket::try_from(connection_state.clone(), raw_packet) {
+        Ok(packet) => handle_packet(stream, packet, states),
         Err(error) => match error {
             PacketParseError::CorruptPacket => println!("Corrupt packet received."),
             PacketParseError::UnknownPacket { id } => println!("Unknown packet type: {id}"),
@@ -60,9 +76,14 @@ fn handle_connection(stream: &mut std::net::TcpStream) {
     }
 }
 
-fn handle_packet(stream: &mut std::net::TcpStream, packet: InboundPacket) {
+fn handle_packet(
+    stream: &mut std::net::TcpStream,
+    packet: InboundPacket,
+    states: Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
+) {
+    println!("Handling {} packet", packet.get_name().unwrap_or("unknown"));
     match packet {
-        InboundPacket::HandshakePacket {
+        InboundPacket::Handshake {
             protocol_version,
             server_address,
             server_port,
@@ -73,11 +94,43 @@ fn handle_packet(stream: &mut std::net::TcpStream, packet: InboundPacket) {
             println!(
                 "A handshake was received: protocol: {protocol_version}, {server_address}:{server_port}, next_state: {next_state}",
             );
+            states.lock().unwrap().insert(
+                stream.peer_addr().unwrap(),
+                match next_state {
+                    1 => ConnectionState::Status,
+                    2 | 3 => ConnectionState::Login,
+                    _ => ConnectionState::Handshaking,
+                },
+            );
+        }
+        InboundPacket::StatusRequest {} => {
             let response = OutboundPacket::StatusResponse {
-                status_json: SERVER_STATUS.to_string(),
+                json_response: SERVER_STATUS.to_string(),
             };
-            let bytes: Vec<u8> = response.into();
-            stream.write_all(bytes.as_slice()).unwrap();
+            send_packet(stream, response);
+        }
+        InboundPacket::PingRequest { timestamp: _ } => {
+            send_packet(
+                stream,
+                OutboundPacket::PongResponse {
+                    timestamp: SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as i64,
+                },
+            );
+        }
+        _ => {
+            println!(
+                "Ignoring the packet of id {}, state {:?}",
+                packet.get_id(),
+                packet.get_state()
+            );
         }
     }
+}
+
+fn send_packet(stream: &mut std::net::TcpStream, packet: OutboundPacket) {
+    let bytes: Vec<u8> = packet.into();
+    stream.write_all(bytes.as_slice()).unwrap();
 }
