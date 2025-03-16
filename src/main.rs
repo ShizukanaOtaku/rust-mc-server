@@ -2,8 +2,7 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     net::{IpAddr, TcpListener},
-    sync::{Arc, Mutex},
-    thread,
+    sync::{Arc, RwLock},
     time::SystemTime,
 };
 
@@ -35,73 +34,85 @@ const SERVER_STATUS: &str = "
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:25565").unwrap();
-    let states = Arc::new(Mutex::new(HashMap::new()));
+    let states = Arc::new(RwLock::new(HashMap::new()));
 
     for stream in listener.incoming() {
-        let mut stream = stream.unwrap();
+        let stream = stream.unwrap();
         let address = stream.peer_addr().unwrap().ip();
+        println!("Handling {address}");
         states
-            .lock()
+            .write()
             .unwrap()
             .insert(address, ConnectionState::Handshaking);
 
         let thread_states = Arc::clone(&states);
-        thread::spawn(move || {
-            handle_connection(&mut stream, &thread_states);
-            println!("Disconnecting a client\n\n\n");
-            stream.shutdown(std::net::Shutdown::Both).unwrap();
-            thread_states
-                .lock()
-                .unwrap()
-                .insert(address, ConnectionState::Handshaking);
-        });
+        handle_connection(stream, &thread_states);
+        println!("Disconnecting a client");
+        thread_states
+            .write()
+            .unwrap()
+            .insert(address, ConnectionState::Handshaking);
     }
 }
 
 fn handle_connection(
-    stream: &mut std::net::TcpStream,
-    states: &Arc<Mutex<HashMap<IpAddr, ConnectionState>>>,
+    mut stream: std::net::TcpStream,
+    states: &Arc<RwLock<HashMap<IpAddr, ConnectionState>>>,
 ) {
     loop {
         let mut buf = vec![0; MAX_PACKET_SIZE];
-        let bytes_read = match stream.read(&mut buf) {
-            Ok(bytes) => bytes,
+        match stream.read(&mut buf) {
+            Ok(bytes_read) => {
+                if bytes_read == 0 {
+                    stream.shutdown(std::net::Shutdown::Both).unwrap();
+                    return;
+                }
+
+                let mut buf = &buf[..bytes_read];
+                let mut packets = Vec::new();
+
+                loop {
+                    let packet = parse_packet(&buf.to_vec());
+                    if let Some(packet) = packet {
+                        packets.push(packet.0);
+                        buf = &buf[packet.1..];
+                    } else {
+                        break;
+                    }
+                }
+
+                let peer_addr = match stream.peer_addr() {
+                    Ok(addr) => addr.ip(),
+                    Err(_) => return,
+                };
+
+                let connection_state = *states
+                    .read()
+                    .unwrap()
+                    .get(&peer_addr)
+                    .unwrap_or(&ConnectionState::Handshaking);
+
+                for raw_packet in packets {
+                    match InboundPacket::try_from(connection_state, raw_packet) {
+                        Ok(packet) => handle_packet(&mut stream, packet, states),
+                        Err(error) => match error {
+                            PacketParseError::CorruptPacket => println!("Corrupt packet received."),
+                            PacketParseError::UnknownPacket { id } => {
+                                println!("Unknown packet type: {id}")
+                            }
+                        },
+                    }
+                }
+            }
             Err(_) => return,
         };
-        let buf = &buf[..bytes_read];
-
-        if bytes_read == 0 {
-            return;
-        }
-
-        println!("{:?}", &buf[..bytes_read]);
-
-        let raw_packet = parse_packet(&buf.to_vec());
-        let peer_addr = match stream.peer_addr() {
-            Ok(addr) => addr.ip(),
-            Err(_) => return,
-        };
-
-        let connection_state = *states
-            .lock()
-            .unwrap()
-            .get(&peer_addr)
-            .unwrap_or(&ConnectionState::Handshaking);
-
-        match InboundPacket::try_from(connection_state, raw_packet) {
-            Ok(packet) => handle_packet(stream, packet, states),
-            Err(error) => match error {
-                PacketParseError::CorruptPacket => println!("Corrupt packet received."),
-                PacketParseError::UnknownPacket { id } => println!("Unknown packet type: {id}"),
-            },
-        }
     }
 }
 
 fn handle_packet(
     stream: &mut std::net::TcpStream,
     packet: InboundPacket,
-    states: &Arc<Mutex<HashMap<IpAddr, ConnectionState>>>,
+    states: &Arc<RwLock<HashMap<IpAddr, ConnectionState>>>,
 ) {
     println!(
         "Handling {} packet",
@@ -109,17 +120,13 @@ fn handle_packet(
     );
     match packet {
         InboundPacket::Handshake {
-            protocol_version,
-            server_address,
-            server_port,
+            protocol_version: _,
+            server_address: _,
+            server_port: _,
             next_state,
         } => {
-            let protocol_version: isize = protocol_version.try_into().unwrap();
             let next_state: isize = next_state.try_into().unwrap();
-            println!(
-                "A handshake was received: protocol: {protocol_version}, {server_address}:{server_port}, next_state: {next_state}",
-            );
-            states.lock().unwrap().insert(
+            states.write().unwrap().insert(
                 stream.peer_addr().unwrap().ip(),
                 match next_state {
                     1 => ConnectionState::Status,
