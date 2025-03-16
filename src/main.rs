@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    error::Error,
     io::{Read, Write},
     net::{SocketAddr, TcpListener},
     sync::{Arc, Mutex},
@@ -47,8 +48,8 @@ fn main() {
         let thread_states = Arc::clone(&states);
         thread::spawn(move || {
             loop {
-                if handle_connection(&mut stream, &thread_states).is_err() {
-                    println!("Disconnecting a client");
+                if let Err(e) = handle_connection(&mut stream, &thread_states) {
+                    println!("Disconnecting a client: {e:?}");
                     break;
                 }
             }
@@ -59,22 +60,22 @@ fn main() {
 fn handle_connection(
     stream: &mut std::net::TcpStream,
     states: &Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
-) -> Result<(), ()> {
+) -> Result<(), Option<Box<dyn Error>>> {
     let mut buf = vec![0; MAX_PACKET_SIZE];
     let bytes_read = match stream.read(&mut buf) {
         Ok(bytes) => bytes,
-        Err(_) => return Err(()),
+        Err(e) => return Err(Some(Box::new(e))),
     };
     let buf = &buf[..bytes_read];
 
     if bytes_read == 0 {
-        return Err(());
+        return Ok(());
     }
 
     let raw_packet = parse_packet(&buf.to_vec());
     let peer_addr = match stream.peer_addr() {
         Ok(addr) => addr,
-        Err(_) => return Err(()),
+        Err(e) => return Err(Some(Box::new(e))),
     };
 
     let connection_state = states
