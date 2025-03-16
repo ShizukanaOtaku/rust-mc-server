@@ -46,14 +46,16 @@ fn main() {
 
         let thread_states = Arc::clone(&states);
         thread::spawn(move || {
-            handle_connection(&mut stream, thread_states);
+            loop {
+                handle_connection(&mut stream, &thread_states);
+            }
         });
     }
 }
 
 fn handle_connection(
     stream: &mut std::net::TcpStream,
-    states: Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
+    states: &Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
 ) {
     let mut buf = vec![0; MAX_PACKET_SIZE];
     let bytes_read = stream.read(&mut buf).unwrap();
@@ -77,7 +79,7 @@ fn handle_connection(
 fn handle_packet(
     stream: &mut std::net::TcpStream,
     packet: InboundPacket,
-    states: Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
+    states: &Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
 ) {
     println!("Handling {} packet", packet.get_name().unwrap_or("unknown"));
     match packet {
@@ -100,10 +102,8 @@ fn handle_packet(
                     _ => ConnectionState::Handshaking,
                 },
             );
-            if next_state != 2 {
-                send_status(stream);
-                send_pong(stream);
-            }
+            send_status(stream);
+            send_pong(stream);
         }
         InboundPacket::StatusRequest {} => send_status(stream),
         InboundPacket::PingRequest { timestamp: _ } => send_pong(stream),
@@ -111,6 +111,17 @@ fn handle_packet(
             stream
                 .write_all(&legacy_server_status(769, "1.21.4", "RustMC", 8, 64))
                 .unwrap();
+        }
+        InboundPacket::LoginStart {
+            player_name,
+            player_uuid: _,
+        } => {
+            send_packet(
+                stream,
+                OutboundPacket::Disconnect {
+                    reason: format!("{{\"text\":\"u r a jerk, {player_name} :3\"}}"),
+                },
+            );
         }
         _ => {
             println!(
