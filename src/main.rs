@@ -47,7 +47,10 @@ fn main() {
         let thread_states = Arc::clone(&states);
         thread::spawn(move || {
             loop {
-                handle_connection(&mut stream, &thread_states);
+                if handle_connection(&mut stream, &thread_states).is_err() {
+                    println!("Disconnecting a client");
+                    break;
+                }
             }
         });
     }
@@ -56,17 +59,31 @@ fn main() {
 fn handle_connection(
     stream: &mut std::net::TcpStream,
     states: &Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
-) {
+) -> Result<(), ()> {
     let mut buf = vec![0; MAX_PACKET_SIZE];
-    let bytes_read = stream.read(&mut buf).unwrap();
+    let bytes_read = match stream.read(&mut buf) {
+        Ok(bytes) => bytes,
+        Err(_) => return Err(()),
+    };
     let buf = &buf[..bytes_read];
+
+    if bytes_read == 0 {
+        return Err(());
+    }
+
     let raw_packet = parse_packet(&buf.to_vec());
+    let peer_addr = match stream.peer_addr() {
+        Ok(addr) => addr,
+        Err(_) => return Err(()),
+    };
+
     let connection_state = states
         .lock()
         .unwrap()
-        .get(&stream.peer_addr().unwrap())
+        .get(&peer_addr)
         .unwrap_or(&ConnectionState::Handshaking)
         .clone();
+
     match InboundPacket::try_from(connection_state.clone(), raw_packet) {
         Ok(packet) => handle_packet(stream, packet, states),
         Err(error) => match error {
@@ -74,6 +91,8 @@ fn handle_connection(
             PacketParseError::UnknownPacket { id } => println!("Unknown packet type: {id}"),
         },
     }
+
+    Ok(())
 }
 
 fn handle_packet(
