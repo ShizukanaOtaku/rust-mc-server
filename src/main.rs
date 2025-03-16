@@ -4,7 +4,7 @@ use std::{
     net::{SocketAddr, TcpListener},
     sync::{Arc, Mutex},
     thread,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use mc_protocol::{
@@ -12,7 +12,7 @@ use mc_protocol::{
     packet::{
         ConnectionState,
         inbound::{InboundPacket, PacketParseError},
-        outbound::OutboundPacket,
+        outbound::{OutboundPacket, legacy_server_status},
         parse_packet,
     },
 };
@@ -58,9 +58,7 @@ fn handle_connection(
     let mut buf = vec![0; MAX_PACKET_SIZE];
     let bytes_read = stream.read(&mut buf).unwrap();
     let buf = &buf[..bytes_read];
-    println!("Read {bytes_read} bytes: {buf:?}");
     let raw_packet = parse_packet(&buf.to_vec());
-    println!("Packet has {} bytes of length", raw_packet.length);
     let connection_state = states
         .lock()
         .unwrap()
@@ -102,23 +100,15 @@ fn handle_packet(
                     _ => ConnectionState::Handshaking,
                 },
             );
+            send_status(stream);
+            send_pong(stream);
         }
-        InboundPacket::StatusRequest {} => {
-            let response = OutboundPacket::StatusResponse {
-                json_response: SERVER_STATUS.to_string(),
-            };
-            send_packet(stream, response);
-        }
-        InboundPacket::PingRequest { timestamp: _ } => {
-            send_packet(
-                stream,
-                OutboundPacket::PongResponse {
-                    timestamp: SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as i64,
-                },
-            );
+        InboundPacket::StatusRequest {} => send_status(stream),
+        InboundPacket::PingRequest { timestamp: _ } => send_pong(stream),
+        InboundPacket::LegacyServerListPing {} => {
+            stream
+                .write_all(&legacy_server_status(769, "1.21.4", "RustMC", 8, 64))
+                .unwrap();
         }
         _ => {
             println!(
@@ -130,7 +120,30 @@ fn handle_packet(
     }
 }
 
+fn send_pong(stream: &mut std::net::TcpStream) {
+    send_packet(
+        stream,
+        OutboundPacket::PongResponse {
+            timestamp: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64,
+        },
+    );
+}
+
+fn send_status(stream: &mut std::net::TcpStream) {
+    send_packet(
+        stream,
+        OutboundPacket::StatusResponse {
+            json_response: SERVER_STATUS.to_string(),
+        },
+    );
+}
+
 fn send_packet(stream: &mut std::net::TcpStream, packet: OutboundPacket) {
     let bytes: Vec<u8> = packet.into();
     stream.write_all(bytes.as_slice()).unwrap();
+    stream.flush().unwrap();
+    thread::sleep(Duration::from_millis(1)); // the client might get overwhelmed otherwise
 }
