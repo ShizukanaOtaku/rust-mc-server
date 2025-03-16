@@ -175,5 +175,4 @@ fn send_packet(stream: &mut std::net::TcpStream, packet: OutboundPacket) {
     let bytes: Vec<u8> = packet.into();
     stream.write_all(bytes.as_slice()).unwrap();
     stream.flush().unwrap();
-    thread::sleep(Duration::from_millis(1)); // the client might get overwhelmed otherwise
 }
