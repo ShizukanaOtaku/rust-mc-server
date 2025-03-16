@@ -4,7 +4,7 @@ use std::{
     net::{SocketAddr, TcpListener},
     sync::{Arc, Mutex},
     thread,
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 
 use mc_protocol::{
