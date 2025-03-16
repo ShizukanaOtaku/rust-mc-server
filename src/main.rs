@@ -149,7 +149,9 @@ fn handle_packet(
             send_packet(
                 stream,
                 OutboundPacket::Disconnect {
-                    reason: format!("{{\"text\":\"u r a jerk, {player_name} :3\"}}"),
+                    reason: format!(
+                        "{{\"text\":\"Sorry, {player_name}, this server software is not ready yet!\"}}"
+                    ),
                 },
             );
         }
