@@ -84,7 +84,7 @@ fn handle_connection(
         .unwrap_or(&ConnectionState::Handshaking)
         .clone();
 
-    match InboundPacket::try_from(connection_state.clone(), raw_packet) {
+    match InboundPacket::try_from(connection_state, raw_packet) {
         Ok(packet) => handle_packet(stream, packet, states),
         Err(error) => match error {
             PacketParseError::CorruptPacket => println!("Corrupt packet received."),
@@ -121,8 +121,6 @@ fn handle_packet(
                     _ => ConnectionState::Handshaking,
                 },
             );
-            send_status(stream);
-            send_pong(stream);
         }
         InboundPacket::StatusRequest {} => send_status(stream),
         InboundPacket::PingRequest { timestamp: _ } => send_pong(stream),
