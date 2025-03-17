@@ -204,6 +204,7 @@ fn handle_packet(
                 allow_server_listings: {allow_server_listings} 
                 particle_status: {particle_status:?}"
             );
+            send_packet(stream, ClientboundPacket::FinishConfiguration {});
         }
         _ => {
             println!("Ignoring the {} packet", packet.get_name().unwrap());
