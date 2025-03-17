@@ -10,10 +10,10 @@ use mc_protocol::{
     MAX_PACKET_SIZE,
     packet::{
         ConnectionState,
-        data_types::{PrefixedArray, Property},
-        inbound::{InboundPacket, PacketParseError},
-        outbound::{OutboundPacket, legacy_server_status},
+        clientbound::{ClientboundPacket, legacy_server_status},
+        data_types::{PrefixedArray, PrefixedOptional, Property},
         parse_packet,
+        serverbound::{PacketParseError, ServerboundPacket},
     },
 };
 
@@ -94,8 +94,7 @@ fn handle_connection(
                     .unwrap_or(&ConnectionState::Handshaking);
 
                 for raw_packet in packets {
-                    println!("raw_packet id: {}, {:?}", raw_packet.id, raw_packet.data);
-                    match InboundPacket::try_from(connection_state, raw_packet) {
+                    match ServerboundPacket::try_from(connection_state, raw_packet) {
                         Ok(packet) => handle_packet(&mut stream, packet, states),
                         Err(error) => match error {
                             PacketParseError::CorruptPacket => println!("Corrupt packet received."),
@@ -116,7 +115,7 @@ fn handle_connection(
 
 fn handle_packet(
     stream: &mut std::net::TcpStream,
-    packet: InboundPacket,
+    packet: ServerboundPacket,
     states: &Arc<RwLock<HashMap<IpAddr, ConnectionState>>>,
 ) {
     let client_address = stream.peer_addr().unwrap().ip();
@@ -125,7 +124,7 @@ fn handle_packet(
         packet.get_name().unwrap_or("an unknown")
     );
     match packet {
-        InboundPacket::Handshake {
+        ServerboundPacket::Handshake {
             protocol_version: _,
             server_address: _,
             server_port: _,
@@ -141,29 +140,32 @@ fn handle_packet(
                 },
             );
         }
-        InboundPacket::StatusRequest {} => send_status(stream),
-        InboundPacket::PingRequest { timestamp: _ } => send_pong(stream),
-        InboundPacket::LegacyServerListPing {} => {
+        ServerboundPacket::StatusRequest {} => send_status(stream),
+        ServerboundPacket::PingRequest { timestamp: _ } => send_pong(stream),
+        ServerboundPacket::LegacyServerListPing {} => {
             stream
                 .write_all(&legacy_server_status(769, "1.21.4", "RustMC", 8, 64))
                 .unwrap();
         }
-        InboundPacket::LoginStart {
+        ServerboundPacket::LoginStart {
             player_name,
             player_uuid,
         } => {
             send_packet(
                 stream,
-                OutboundPacket::LoginSuccess {
+                ClientboundPacket::LoginSuccess {
                     uuid: player_uuid,
                     username: player_name,
                     properties: PrefixedArray::new(vec![Property(
                         "textures".to_string(),
                         "".to_string(),
-                        "".to_string(),
+                        PrefixedOptional(Some(String::new())),
                     )]),
                 },
             );
+        }
+        ServerboundPacket::LoginAcknowledged {} => {
+            println!("{client_address} acknowledged the login, entering configration");
             states
                 .write()
                 .unwrap()
@@ -178,7 +180,7 @@ fn handle_packet(
 fn send_pong(stream: &mut std::net::TcpStream) {
     send_packet(
         stream,
-        OutboundPacket::PongResponse {
+        ClientboundPacket::PongResponse {
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
@@ -190,13 +192,13 @@ fn send_pong(stream: &mut std::net::TcpStream) {
 fn send_status(stream: &mut std::net::TcpStream) {
     send_packet(
         stream,
-        OutboundPacket::StatusResponse {
+        ClientboundPacket::StatusResponse {
             json_response: SERVER_STATUS.to_string(),
         },
     );
 }
 
-fn send_packet(stream: &mut std::net::TcpStream, packet: OutboundPacket) {
+fn send_packet(stream: &mut std::net::TcpStream, packet: ClientboundPacket) {
     let bytes: Vec<u8> = packet.into();
     stream.write_all(bytes.as_slice()).unwrap();
 }
