@@ -87,17 +87,24 @@ fn handle_connection(
                     Err(_) => return,
                 };
 
-                let connection_state = *states
-                    .read()
-                    .unwrap()
-                    .get(&peer_addr)
-                    .unwrap_or(&ConnectionState::Handshaking);
-
                 for raw_packet in packets {
+                    let connection_state = *states
+                        .read()
+                        .unwrap()
+                        .get(&peer_addr)
+                        .unwrap_or(&ConnectionState::Handshaking);
+                    let id = raw_packet.id;
+                    let length = raw_packet.length;
+                    let data = raw_packet.data.clone();
                     match ServerboundPacket::try_from(connection_state, raw_packet) {
                         Ok(packet) => handle_packet(&mut stream, packet, states),
                         Err(error) => match error {
-                            PacketParseError::CorruptPacket => println!("Corrupt packet received."),
+                            PacketParseError::CorruptPacket { problematic_field } => {
+                                println!(
+                                    "[{:?}] Corrupt packet received: {length}, {id}, {data:?}\n\t Corrupt field: {problematic_field}",
+                                    states.read().unwrap().get(&peer_addr).unwrap()
+                                );
+                            }
                             PacketParseError::UnknownPacket { id } => {
                                 println!(
                                     "Unknown packet type: {id} for state {:?}",
@@ -165,11 +172,35 @@ fn handle_packet(
             );
         }
         ServerboundPacket::LoginAcknowledged {} => {
-            println!("{client_address} acknowledged the login, entering configration");
+            println!("{client_address} acknowledged the login, entering configuration");
             states
                 .write()
                 .unwrap()
                 .insert(client_address, ConnectionState::Configuration);
+        }
+        ServerboundPacket::ClientInformation {
+            locale,
+            view_distance,
+            chat_mode,
+            chat_colors,
+            displayed_skin_parts,
+            main_hand,
+            enable_text_filtering,
+            allow_server_listings,
+            particle_status,
+        } => {
+            println!(
+                "Received client info:
+                locale: {locale}
+                view_distance: {view_distance} 
+                chat_mode: {chat_mode:?}
+                chat_colors: {chat_colors}
+                displayed_skin_parts: {displayed_skin_parts}
+                main_hand: {main_hand:?}
+                enable_text_filtering: {enable_text_filtering}
+                allow_server_listings: {allow_server_listings} 
+                particle_status: {particle_status:?}"
+            );
         }
         _ => {
             println!("Ignoring the {} packet", packet.get_name().unwrap());
