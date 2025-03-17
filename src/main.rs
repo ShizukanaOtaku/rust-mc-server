@@ -3,6 +3,7 @@ use std::{
     io::{Read, Write},
     net::{IpAddr, TcpListener},
     sync::{Arc, RwLock},
+    thread,
     time::SystemTime,
 };
 
@@ -47,12 +48,14 @@ fn main() {
             .insert(address, ConnectionState::Handshaking);
 
         let thread_states = Arc::clone(&states);
-        handle_connection(stream, &thread_states);
-        println!("Disconnecting a client");
-        thread_states
-            .write()
-            .unwrap()
-            .insert(address, ConnectionState::Handshaking);
+        thread::spawn(move || {
+            handle_connection(stream, &thread_states);
+            println!("Disconnecting a client");
+            thread_states
+                .write()
+                .unwrap()
+                .insert(address, ConnectionState::Handshaking);
+        });
     }
 }
 
