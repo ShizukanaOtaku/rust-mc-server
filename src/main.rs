@@ -157,11 +157,11 @@ fn handle_packet(
                 OutboundPacket::LoginSuccess {
                     uuid: player_uuid,
                     username: player_name,
-                    properties: PrefixedArray::new(vec![Property {
-                        0: "textures".to_string(),
-                        1: "".to_string(),
-                        2: "".to_string(),
-                    }]),
+                    properties: PrefixedArray::new(vec![Property(
+                        "textures".to_string(),
+                        "".to_string(),
+                        "".to_string(),
+                    )]),
                 },
             );
             states
