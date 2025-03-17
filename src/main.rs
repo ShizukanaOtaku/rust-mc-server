@@ -10,6 +10,7 @@ use mc_protocol::{
     MAX_PACKET_SIZE,
     packet::{
         ConnectionState,
+        data_types::{PrefixedArray, Property},
         inbound::{InboundPacket, PacketParseError},
         outbound::{OutboundPacket, legacy_server_status},
         parse_packet,
@@ -93,6 +94,7 @@ fn handle_connection(
                     .unwrap_or(&ConnectionState::Handshaking);
 
                 for raw_packet in packets {
+                    println!("raw_packet id: {}, {:?}", raw_packet.id, raw_packet.data);
                     match InboundPacket::try_from(connection_state, raw_packet) {
                         Ok(packet) => handle_packet(&mut stream, packet, states),
                         Err(error) => match error {
@@ -117,6 +119,7 @@ fn handle_packet(
     packet: InboundPacket,
     states: &Arc<RwLock<HashMap<IpAddr, ConnectionState>>>,
 ) {
+    let client_address = stream.peer_addr().unwrap().ip();
     println!(
         "Handling {} packet",
         packet.get_name().unwrap_or("an unknown")
@@ -130,7 +133,7 @@ fn handle_packet(
         } => {
             let next_state: isize = next_state.try_into().unwrap();
             states.write().unwrap().insert(
-                stream.peer_addr().unwrap().ip(),
+                client_address,
                 match next_state {
                     1 => ConnectionState::Status,
                     2 | 3 => ConnectionState::Login,
@@ -147,23 +150,27 @@ fn handle_packet(
         }
         InboundPacket::LoginStart {
             player_name,
-            player_uuid: _,
+            player_uuid,
         } => {
             send_packet(
                 stream,
-                OutboundPacket::Disconnect {
-                    reason: format!(
-                        "{{\"text\":\"Sorry, {player_name}, this server software is not ready yet!\", \"color\":\"red\"}}"
-                    ),
+                OutboundPacket::LoginSuccess {
+                    uuid: player_uuid,
+                    username: player_name,
+                    properties: PrefixedArray::new(vec![Property {
+                        0: "textures".to_string(),
+                        1: "".to_string(),
+                        2: "".to_string(),
+                    }]),
                 },
             );
+            states
+                .write()
+                .unwrap()
+                .insert(client_address, ConnectionState::Configuration);
         }
         _ => {
-            println!(
-                "Ignoring the packet of id {}, state {:?}",
-                packet.get_id(),
-                packet.get_state()
-            );
+            println!("Ignoring the {} packet", packet.get_name().unwrap());
         }
     }
 }
