@@ -98,7 +98,10 @@ fn handle_connection(
                         Err(error) => match error {
                             PacketParseError::CorruptPacket => println!("Corrupt packet received."),
                             PacketParseError::UnknownPacket { id } => {
-                                println!("Unknown packet type: {id}")
+                                println!(
+                                    "Unknown packet type: {id} for state {:?}",
+                                    states.read().unwrap().get(&peer_addr).unwrap()
+                                )
                             }
                         },
                     }
