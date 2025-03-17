@@ -150,7 +150,7 @@ fn handle_packet(
                 stream,
                 OutboundPacket::Disconnect {
                     reason: format!(
-                        "{{\"text\":\"Sorry, {player_name}, this server software is not ready yet!\"}}"
+                        "{{\"text\":\"Sorry, {player_name}, this server software is not ready yet!\", \"color\":\"red\"}}"
                     ),
                 },
             );
