@@ -206,6 +206,9 @@ fn handle_packet(
             );
             send_packet(stream, ClientboundPacket::FinishConfiguration {});
         }
+        ServerboundPacket::FinishConfiguration {} => {
+            println!("{client_address} finished configuration");
+        }
         _ => {
             println!("Ignoring the {} packet", packet.get_name().unwrap());
         }
