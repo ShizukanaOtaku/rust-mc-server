@@ -133,6 +133,11 @@ fn handle_packet(
         "Handling {} packet",
         packet.get_name().unwrap_or("an unknown")
     );
+    let state = *states
+        .read()
+        .unwrap()
+        .get(&client_address)
+        .unwrap_or(&ConnectionState::Handshaking);
     match packet {
         ServerboundPacket::Handshake {
             protocol_version: _,
@@ -150,8 +155,8 @@ fn handle_packet(
                 },
             );
         }
-        ServerboundPacket::StatusRequest {} => send_status(stream),
-        ServerboundPacket::PingRequest { timestamp: _ } => send_pong(stream),
+        ServerboundPacket::StatusRequest {} => send_status(state, stream),
+        ServerboundPacket::PingRequest { timestamp: _ } => send_pong(state, stream),
         ServerboundPacket::LegacyServerListPing {} => {
             stream
                 .write_all(&legacy_server_status(769, "1.21.4", "RustMC", 8, 64))
@@ -162,6 +167,7 @@ fn handle_packet(
             player_uuid,
         } => {
             send_packet(
+                ConnectionState::Status,
                 stream,
                 ClientboundPacket::LoginSuccess {
                     uuid: player_uuid,
@@ -204,7 +210,11 @@ fn handle_packet(
                 allow_server_listings: {allow_server_listings} 
                 particle_status: {particle_status:?}"
             );
-            send_packet(stream, ClientboundPacket::FinishConfiguration {});
+            send_packet(
+                ConnectionState::Configuration,
+                stream,
+                ClientboundPacket::FinishConfiguration {},
+            );
         }
         ServerboundPacket::FinishConfiguration {} => {
             println!("{client_address} finished configuration");
@@ -215,8 +225,9 @@ fn handle_packet(
     }
 }
 
-fn send_pong(stream: &mut std::net::TcpStream) {
+fn send_pong(state: ConnectionState, stream: &mut std::net::TcpStream) {
     send_packet(
+        state,
         stream,
         ClientboundPacket::PongResponse {
             timestamp: SystemTime::now()
@@ -227,8 +238,9 @@ fn send_pong(stream: &mut std::net::TcpStream) {
     );
 }
 
-fn send_status(stream: &mut std::net::TcpStream) {
+fn send_status(state: ConnectionState, stream: &mut std::net::TcpStream) {
     send_packet(
+        state,
         stream,
         ClientboundPacket::StatusResponse {
             json_response: SERVER_STATUS.to_string(),
@@ -236,7 +248,13 @@ fn send_status(stream: &mut std::net::TcpStream) {
     );
 }
 
-fn send_packet(stream: &mut std::net::TcpStream, packet: ClientboundPacket) {
-    let bytes: Vec<u8> = packet.into();
+fn send_packet(
+    state: ConnectionState,
+    stream: &mut std::net::TcpStream,
+    packet: ClientboundPacket,
+) {
+    let bytes: Vec<u8> = packet
+        .serialize(state)
+        .expect("Failed to serialize a packet");
     stream.write_all(bytes.as_slice()).unwrap();
 }
